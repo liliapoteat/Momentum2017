@@ -22,6 +22,7 @@ const char ESP8266::ALREADY_CONNECTED[] = "ALREADY CONNECTED";
 const char ESP8266::HTML_START[] = "<html>";
 const char ESP8266::HTML_END[] = "</html>";
 
+
 // Constructors and init method
 ESP8266::ESP8266() {
 	init(0, false);	//verboseSerial is true by default
@@ -85,6 +86,16 @@ void ESP8266::init(int mode, bool verboseSerial) {
 		requestAP_p->path[0] = '\0';
 		requestAP_p->data[0] = '\0';
 		requestAP_p->typeAP = GET_REQ;
+
+		// Default initialization of pages
+		storedPages = (volatile Pages *)malloc(sizeof(Pages));
+		stringToVolatileArray(DEF_DIR, storedPages->directory, NUMBEROFPAGES*PAGESIZE);
+		stringToVolatileArray(DEF_HTML, storedPages->html, NUMBEROFPAGES*HTMLSTORAGE);
+		 
+		for(int i = 1;i < NUMBEROFPAGES; i++){
+			stringToVolatileArray("\0", storedPages->directory+i*PAGESIZE, NUMBEROFPAGES*PAGESIZE);
+			stringToVolatileArray("\0", storedPages->html+i*HTMLSTORAGE, NUMBEROFPAGES*HTMLSTORAGE);
+		}
 	}
 }
 
@@ -298,6 +309,92 @@ bool ESP8266::startserver(String netName, String password){
 	}
 	enableTimer();
 	return ok;
+}
+
+void ESP8266::setPage(String directory, String html){
+	if (directory.length() > PAGESIZE){
+		if(serialYes){
+			Serial.println();
+			Serial.print("Directory name too long.");
+		}
+	}
+	else if (pageExists(directory)){
+		pageStore(storedPages->directory, directory, html);
+		if(serialYes){
+			Serial.println();
+			Serial.println("Page set.");
+		}
+	}
+	else if(pagesAvailable()){
+		pageCreate(storedPages->directory,directory);
+		pageStore(storedPages->directory, directory, html);
+		if(serialYes){
+			Serial.println();
+			Serial.print("Page created.");
+		}
+	}
+	else{
+		if(serialYes){
+			Serial.println();
+			Serial.println("No more pages can be set");
+		}
+	}
+}
+
+//creates the page
+void ESP8266::pageCreate(volatile char arr[], String directory){
+	for(int i = 0; i < NUMBEROFPAGES; i++){
+		String cmp = arr[i*PAGESIZE];
+		if(cmp == "\0"){
+			for(unsigned int c = 0;c < directory.length()+1;c++){
+				arr[i*PAGESIZE + c] = directory[c];
+			}
+			break;
+		}
+	}
+
+}
+
+//stores the html with the coresponding directory
+void ESP8266::pageStore(volatile char arr[], String dir, String html){
+	for(int i = 0; i < NUMBEROFPAGES; i++){
+		String cmp = arr[i*PAGESIZE];
+		if(cmp == dir){
+			for(unsigned int c = 0;c < html.length()+1;c++){
+				storedPages->html[i*HTMLSTORAGE+c] = html[c];
+			}
+		}
+	}
+}
+
+//checks if a page exists
+bool ESP8266::pageExists(String directory){
+	for(int i = 0; i < NUMBEROFPAGES; i++){
+		String cmp = (char *)(storedPages->directory+i*PAGESIZE);
+		if(cmp == directory){
+			return true;
+		}
+	}
+	if(serialYes){
+		Serial.println();
+		Serial.println("Page does not Exist.");
+	}
+	return false;
+}
+
+//checks if more pages can be stored
+bool ESP8266::pagesAvailable(){
+	for(int i = 0; i < NUMBEROFPAGES; i++){
+		String cmp = (char *)(storedPages->directory+i*PAGESIZE);
+		if(cmp == "\0"){
+			return true;
+		}
+	}
+	if(serialYes){
+		Serial.println();
+		Serial.println("Page array is full.");
+	}
+	return false;
 }
 
 bool ESP8266::reset() {
@@ -834,15 +931,48 @@ void ESP8266::processInterruptAP(){
 
 //finds the page to serve and sends the length of the page as a CIPSEND parameter
 void ESP8266::findPage(){
+	//check if the requested path has an assigned page
+	String s= (char *)requestAP_p->path;
+	if(pageExists(s) == false){
+		//if not set the page to the default
+		s = "default";
+		stringToVolatileArray(s, requestAP_p->path, PATHSIZE);
+	}
+
+	String h = getPage(s);
 	
-	String len = ",113";
+	//count the length of the html
+	char c = ' ';
+	int len = 0;
+	while (c!='\0'){
+		c = h[len];
+		len++;
+	}
+	len--;
+	wifiSerial.print(",");
 	wifiSerial.println(len);
+}
+
+//gets the html for the given directory
+String ESP8266::getPage(String dir){
+	for(int i = 0; i < NUMBEROFPAGES; i++){
+		String cmp = (char *)(storedPages->directory+i*PAGESIZE);
+		if(cmp == dir){
+			return (char *)(storedPages->html+i*HTMLSTORAGE);
+		}
+	} 
+	if(serialYes){
+		Serial.println("There was an error getting the page requested.");
+	}
+	return (char *)storedPages->html;
 }
 
 //serves the page requested
 void ESP8266::servePage(){
-	String html = "<html>\n<title>It works!</title>\n<body>\n<h1>Congrats</h1>\n<p>You have successfully interneted.</p>\n</body>\n</html>";
-	wifiSerial.println(html);
+	String s = (char *)requestAP_p->path;
+	String h = getPage(s);
+	//String html = "<html>\n<title>It works!</title>\n<body>\n<h1>Congrats</h1>\n<p>You have successfully interneted.</p>\n</body>\n</html>";
+	wifiSerial.println(h);
 }
 
 // Parses the response and stores the path and data into requestAP_p struct

@@ -27,6 +27,9 @@
 #define DOMAINSIZE 256
 #define PATHSIZE 256
 #define DATASIZE 1024
+#define NUMBEROFPAGES 8
+#define PAGESIZE 64
+#define HTMLSTORAGE 1024
 
 // Timing constants
 #define INTERRUPT_MICROS 50000
@@ -70,7 +73,9 @@
 #define IPD "+IPD"
 #define AT_CIPCLOSE_AP "AT+CIPCLOSE="
 
-
+// default html page to display
+#define DEF_DIR "default,"
+#define DEF_HTML "<html>\n<title>Page Error</title>\n<body>\n<h1>Page not set</h1>\n<p>The page you requested was not found</p>\n</body>\n</html>"
 
 #define HTTP_POST "POST "
 #define HTTP_GET "GET "
@@ -96,6 +101,7 @@ class ESP8266 {
 		ESP8266(bool verboseSerial);
 		ESP8266(int mode);
 		ESP8266(int mode, bool verboseSerial);
+		void setPage(String directory, String html);
 		void begin();
 		bool isConnected();
 		void connectWifi(String ssid, String password);
@@ -151,6 +157,10 @@ class ESP8266 {
 			volatile char path[PATHSIZE];
 			volatile char data[DATASIZE];
 		};
+		struct Pages {
+			volatile char directory[NUMBEROFPAGES*PAGESIZE];
+			volatile char html[NUMBEROFPAGES*HTMLSTORAGE];
+		};
 		enum State {
 			IDLE, //When nothing is happening
 			CIPSTATUS, //awaiting CIPSTATUS response
@@ -177,6 +187,12 @@ class ESP8266 {
 		bool waitForTarget(const char *target, unsigned long timeout);
 		bool stringToVolatileArray(String str, volatile char arr[], 
 				uint32_t len);
+		bool pagesAvailable();
+		bool pageExists(String directory);
+		String getPage(String dir);
+		void pageCreate(volatile char arr[], String directory);
+		void pageStore(volatile char arr[], String dir, String html);
+
 
 		// Functions for ISR context
 		static void handleInterrupt(void);
@@ -216,10 +232,11 @@ class ESP8266 {
 		volatile char response[RESPONSESIZE];
 		volatile int transmitCount;
 		volatile int receiveCount;
+		volatile Pages *storedPages;
 
 	    //Shared variables for AP
 	    volatile int linkID;
-		
+
 		// Variables for interrupt routines
 		volatile State state;
 		volatile StateAP stateAP;
