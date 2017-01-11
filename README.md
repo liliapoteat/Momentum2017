@@ -1,6 +1,6 @@
 # Momentum2017
 
-This is a compilation of code samples for MIT's IAP course, momentum. This year's focus is around developing a rover that can be driven with no visual feedback. 
+The course [website](http://ome.mit.edu/programs-services/momentum-overview).
 
 ## Key Concepts
 
@@ -22,6 +22,10 @@ TODO: Link to parts folder with data sheets and diagrams
 * [Rover Example](RoverController/README.md) - This can be used to interface the rover with the wifi.
 
 TODO: Links to various code folders
+
+## Other Resources
+
+* [Joe's Tutorial](https://iesc-s1.mit.edu/2017/momentum)
 
 ## License
 
