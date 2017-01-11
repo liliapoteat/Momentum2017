@@ -21,7 +21,9 @@ const char ESP8266::STATUS[] = "STATUS:";
 const char ESP8266::ALREADY_CONNECTED[] = "ALREADY CONNECTED";
 const char ESP8266::HTML_START[] = "<html>";
 const char ESP8266::HTML_END[] = "</html>";
-
+const char ESP8266::SEND_FAIL[] = "SEND FAIL";
+const char ESP8266::CLOSED[] = "CLOSED";
+const char ESP8266::UNLINK[] = "UNLINK";
 
 // Constructors and init method
 ESP8266::ESP8266() {
@@ -466,7 +468,7 @@ void ESP8266::enableTimer() {
   if (ESPmode == 0){
 	  timer.begin(ESP8266::handleInterrupt, INTERRUPT_MICROS);
   }
-  else if (ESPmode ==1){
+  else if (ESPmode == 1){
     timer.begin(ESP8266::handleInterruptAP, INTERRUPT_MICROS);
   }
 }
@@ -526,10 +528,7 @@ void ESP8266::getMACFromDevice() {
 // Empty wifi serial buffer
 void ESP8266::emptyRx() {
 	while (wifiSerial.available() > 0) {
-		char c = wifiSerial.read();
-		//if (serialYes) {
-		//	Serial.print(c);
-		//}
+		wifiSerial.read();
 	}
 }
 
@@ -640,6 +639,8 @@ void ESP8266::processInterrupt() {
 					state = CWJAP;
 				}
 			} else if (isTargetInResp(ERROR)) {
+				Serial.println(debugCount);
+				debugCount = 0;
 				if (serialYes) {
 					Serial.println("\nCouldn't determine connection status");
 				}
@@ -802,7 +803,14 @@ void ESP8266::processInterrupt() {
 				wifiSerial.println(AT_CIPCLOSE);
 				hasRequest = request_p->auto_retry;
 				state = IDLE;
-			}	
+			} else if (isTargetInResp(SEND_FAIL)){
+				if (serialYes) {
+					Serial.println("Timeout while confirming HTTP send");
+				}
+				wifiSerial.println(AT_CIPCLOSE);
+				hasRequest = request_p->auto_retry;
+				state = IDLE;
+			}
 			break;
 		case AWAITRESPONSE:
 			if (isTargetInResp(HTML_END)) {
@@ -816,12 +824,18 @@ void ESP8266::processInterrupt() {
 				hasRequest = false; //We're done with this request
 				responseReady = true;
 				receiveCount++;	// ESP8266 has successfully received a response from the web
+				debugCount++;
 				state = IDLE;
 			} else if (millis() - timeoutStart > HTTP_TIMEOUT) {
 				if (serialYes) {
 					Serial.println("HTTP timeout");
 				}
 				wifiSerial.println(AT_CIPCLOSE);
+				Serial.println(debugCount);
+				debugCount = 0;
+				hasRequest = request_p->auto_retry;
+				state = IDLE;
+			} else if (isTargetInResp(CLOSED)){
 				hasRequest = request_p->auto_retry;
 				state = IDLE;
 			}
@@ -843,6 +857,7 @@ void ESP8266::processInterruptAP(){
 			        Serial.print("linkID: ");
 			        Serial.println(linkID);
 		    	}
+		    	timeoutStart = millis();
 		        stateAP = AWAITREQUEST;
 		        responseReady = true;
 			}
@@ -860,18 +875,16 @@ void ESP8266::processInterruptAP(){
 				String resp = (char *)response;
 				requestAP_p->typeAP = POST_REQ;
 				requestParse(resp);
-				wifiSerial.print(AT_CIPSEND);
-				wifiSerial.print(linkID);
 				timeoutStart = millis();
+				first = true;
 				stateAP = SENDRESPONSE;
 			}
 			else if (getStringFromResp("GET", "Host",(char *)response)){
 				String resp = (char *)response;
 				requestAP_p->typeAP = GET_REQ;
 				requestParse(resp);
-				wifiSerial.print(AT_CIPSEND);
-				wifiSerial.print(linkID);
 				timeoutStart = millis();
+				first = true;
 				stateAP = SENDRESPONSE;
 			}
 			else {
@@ -884,48 +897,75 @@ void ESP8266::processInterruptAP(){
 		break;
 		}
 	    case SENDRESPONSE:
-	    {
-	    	bool ok = true;
-	    	findPage();
-	    	ok = ok && waitForTarget(OK_PROMPT, HTTP_TIMEOUT);
-	    	if(ok){
+	    {	
+	    	if(first){
+	    		wifiSerial.print(AT_CIPSEND);
+				wifiSerial.print(linkID);
+		    	findPage();
+		    	first = false;
+	    	}
+	    	if(isTargetInResp(OK_PROMPT)){
+	    		emptyRxAndBuffer();
 	    		servePage();
+	    		timeoutStart = millis();
 	    		stateAP = DATAOUTAP;
 	    	}
-	    	else{
-	    		stateAP = AWAITCLIENT;
+	    	else if(isTargetInResp(ERROR)){
+	    		emptyRxAndBuffer();
+	    		first = true;
+	    	}
+	    	else if (millis() - timeoutStart > SENDRESPONSE_TIMEOUT){
+		    	timeoutStart = millis();
+		    	stateAP = AWAITREQUEST;
 	    		if (serialYes){
 	    			Serial.println();
-	    			Serial.println("CIPSEND ERROR");
+	    			Serial.println("CIPSEND TIMEOUT");
 	    		}
 	    	}
 	    break;
 	    }
 	    case DATAOUTAP:
 	    {
-	    	bool ok = true;
-	    	ok = ok && waitForTarget(SEND_OK, CIPSEND_TIMEOUT);
-	    	if(ok){
+			if(isTargetInResp(SEND_OK)){
 	    		emptyRxAndBuffer();
+	 			timeoutStart = millis();
 	    		wifiSerial.print(AT_CIPCLOSE_AP);
 	    		wifiSerial.println(linkID);
-	    		waitForTarget(OK, CIPSEND_TIMEOUT);
-	    		emptyRxAndBuffer();
-	    		stateAP = AWAITCLIENT;
+	    		stateAP = CLOSE;
 	    		if (serialYes){
 	    			Serial.println();
 	    			Serial.println("CIPSEND COMPLETE");
 	    		}
 	    	}
-	    	else{
-	    		stateAP = AWAITCLIENT;
+	    	else if (millis() - timeoutStart > CIPSEND_TIMEOUT){
+	    		stateAP = SENDRESPONSE;
+	    		timeoutStart = millis();
 	    		if (serialYes){
 	    			Serial.println();
 	    			Serial.println("CIPSEND ERROR");
 	    		}
 	    	}
-	    }
 	    break;
+	    }
+	    case CLOSE:
+	    {
+	    	if(isTargetInResp(OK)){
+	    		emptyRxAndBuffer();
+	    		timeoutStart = millis();
+	    		stateAP = AWAITCLIENT;
+    		}
+    		if(isTargetInResp(UNLINK)){
+    			emptyRxAndBuffer();
+	    		timeoutStart = millis();
+	    		stateAP = AWAITCLIENT;
+    		}
+    		else if (millis() - timeoutStart > CLOSE_TIMEOUT){
+    			wifiSerial.print(AT_CIPCLOSE_AP);
+	    		wifiSerial.println(linkID);
+	    		timeoutStart = millis();
+    		}
+	    }
+	   
 	}
 }
 
@@ -1095,10 +1135,7 @@ int ESP8266::getStatusFromResp() {
 // Load wifi serial buffer into character array (inputBuffer)
 void ESP8266::loadRx() {
 	int buffIndex = strlen((char *)inputBuffer);
-	int now = millis();
-	while (millis()-now < 50 && buffIndex < BUFFERSIZE-1) {
-		if (wifiSerial.available()){	
-			now = millis();
+	while (wifiSerial.available() > 0 && buffIndex < BUFFERSIZE-1) {	
 			char c = wifiSerial.read();
 			if (serialYes) {
 				Serial.print(c);
@@ -1106,7 +1143,6 @@ void ESP8266::loadRx() {
 			inputBuffer[buffIndex] = c;
 			inputBuffer[buffIndex+1] = '\0';
 			buffIndex++;
-		}
 	}
 	if (buffIndex >= BUFFERSIZE -1) {
 		if (serialYes) {

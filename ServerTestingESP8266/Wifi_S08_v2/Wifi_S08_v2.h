@@ -19,8 +19,8 @@
 #define POST 1
 
 // Sizes of character arrays
-#define BUFFERSIZE 8192
-#define RESPONSESIZE 8192
+#define BUFFERSIZE 4096
+#define RESPONSESIZE 4096
 #define MACSIZE 17
 #define SSIDSIZE 32
 #define PASSWORDSIZE 64
@@ -46,6 +46,9 @@
 #define CIPSEND_TIMEOUT 5000
 #define DATAOUT_TIMEOUT 5000
 #define HTTP_TIMEOUT 12000
+#define SENDRESPONSE_TIMEOUT 5000
+#define CLOSE_TIMEOUT 1000
+
 
 // AT Commands, some of which require appended arguments
 #define AT_BASIC "AT"
@@ -141,6 +144,9 @@ class ESP8266 {
 		static char const ALREADY_CONNECTED[];
 		static char const HTML_START[];
 		static char const HTML_END[];
+		static char const SEND_FAIL[];
+		static char const CLOSED[];
+		static char const UNLINK[];
 
 		// Private enums and structs
 		enum RequestType {GET_REQ, POST_REQ};
@@ -175,6 +181,7 @@ class ESP8266 {
 			AWAITREQUEST, //awaiting client request
 			SENDRESPONSE, //return a response
 			DATAOUTAP, //awaiting "SEND OK" confirmation
+			CLOSE, //close the connection
 		};
 
 		// Functions for strictly non-ISR context
@@ -227,15 +234,17 @@ class ESP8266 {
 		volatile bool doAutoConn;
 		volatile bool hasRequest;
 		volatile Request *request_p;
-		volatile RequestAP *requestAP_p;
 		volatile bool responseReady;
 		volatile char response[RESPONSESIZE];
 		volatile int transmitCount;
 		volatile int receiveCount;
-		volatile Pages *storedPages;
 
 	    //Shared variables for AP
 	    volatile int linkID;
+	    volatile Pages *storedPages;
+		volatile RequestAP *requestAP_p;
+	    volatile int debugCount;
+	    volatile bool first;
 
 		// Variables for interrupt routines
 		volatile State state;
