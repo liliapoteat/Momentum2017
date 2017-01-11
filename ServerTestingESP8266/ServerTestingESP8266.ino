@@ -5,7 +5,7 @@
 #define BLINKPERIOD 1000
 #define UPDATEPERIOD 1000
 
-ESP8266 wifi = ESP8266(1,true);
+ESP8266 wifi = ESP8266(1,false);
 String html = "<html>\n<title>It works!</title>\n<body>\n<h1>Congrats</h1>\n<p>You have successfully interneted.</p>\n</body>\n</html>";
 int val = 0;
 int led = 13;

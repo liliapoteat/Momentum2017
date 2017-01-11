@@ -41,7 +41,7 @@ ESP8266::ESP8266(int mode, bool verboseSerial) {
 
 void ESP8266::init(int mode, bool verboseSerial) {
 	_instance = this;  //static reference to this object, for ISR handler
-	serialYes = true;
+	serialYes = verboseSerial;
 	state = IDLE;
 	stateAP = AWAITCLIENT;
 	ESPmode = mode;
@@ -184,7 +184,6 @@ void ESP8266::sendRequest(int type, String domain, int port, String path, String
 		responseReady = false;	
 		enableTimer();
 		//benchmark = millis();
-		Serial.println("Request Sent");
 	} else if (serialYes) {
 		Serial.println("Could not make request; one is already in progress");
 	}
@@ -815,10 +814,11 @@ void ESP8266::processInterrupt() {
 		case AWAITRESPONSE:
 			if (isTargetInResp(HTML_END)) {
 				benchmark = millis() - benchmark;
-				Serial.println(benchmark);
 				getStringFromResp(HTML_START, HTML_END, (char *)response);
 				if (serialYes) {
 					Serial.println("Got HTTP response!");
+					Serial.print("Response speed: ");
+					Serial.println(benchmark);
 				}
 				wifiSerial.println(AT_CIPCLOSE);
 				hasRequest = false; //We're done with this request
@@ -848,20 +848,27 @@ void ESP8266::processInterruptAP(){
 	switch(stateAP) {
 		case AWAITCLIENT:
 			{
-			if (isTargetInResp(IPD)) { // get link id
-				getStringFromResp(IPD,":",(char *)response);
+			// get link id
+			if(getStringFromResp("PD",":",(char *)response)){
 		        String resp = (char *)response;
-		        linkID = int(resp[5]) - 48;
+		        
+		        linkID = int(resp[3]) - 48;
+
 		        if (serialYes){
+
 			        Serial.println();
 			        Serial.print("linkID: ");
 			        Serial.println(linkID);
+			        Serial.print("resp: ");
+			        Serial.println(resp);
+
 		    	}
 		    	timeoutStart = millis();
 		        stateAP = AWAITREQUEST;
 		        responseReady = true;
-			}
+		    }
 			else {
+				emptyRxAndBuffer();
 	    		if (serialYes){
 		    		Serial.println();
 		    		Serial.println("ESP8266 AWAITCLIENT");
@@ -912,7 +919,7 @@ void ESP8266::processInterruptAP(){
 	    	}
 	    	else if(isTargetInResp(ERROR)){
 	    		emptyRxAndBuffer();
-	    		first = true;
+	    		stateAP = CLOSE;
 	    	}
 	    	else if (millis() - timeoutStart > SENDRESPONSE_TIMEOUT){
 		    	timeoutStart = millis();

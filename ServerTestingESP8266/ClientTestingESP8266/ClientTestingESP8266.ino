@@ -6,10 +6,10 @@
 #define SSID "ESP8266"
 #define PASSWD "MOMENTUM"
 
-#define POLLPERIOD 100
+#define POLLPERIOD 0
 #define BLOCKCHECK 100
 
-ESP8266 wifi = ESP8266(0,true);
+ESP8266 wifi = ESP8266(0,false);
 
 String MAC;
 unsigned long lastRequest = 0;
@@ -27,6 +27,8 @@ void setup() {
   pinMode(led, OUTPUT);
 }
 
+int count = 0;
+
 void loop() {
   digitalWrite(led, HIGH);   // turn the LED on (HIGH is the voltage level)
   delay(BLOCKCHECK);               // wait for a second
@@ -38,6 +40,8 @@ void loop() {
     String response = wifi.getResponse();
     Serial.print("RESPONSE: ");
     Serial.println(response);
+    count++;
+    Serial.println(count);
   }
 
   if (!wifi.isBusy() && millis()-lastRequest > POLLPERIOD) {
