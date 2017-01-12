@@ -1,16 +1,22 @@
 #include "RoverLib.h"
 #include <Arduino.h>
-#include <Wifi_S08.h>
+#include <Wifi_S08_v2.h>
 
-#define SSID "ESPap"
-#define PASSWD "thereisnospoon"
-#define POLLPERIOD 1000
+#define SSID "ESPeezy"
+#define PASSWD "MOMENTUM"
+#define POLLPERIOD 100
 
 unsigned long lastRequest = 0;
 
 ESP8266 wifi;
 
 String MAC;
+
+char res[512];
+char* rptr;
+
+char cms[512];
+char* cptr;
 
 Rover WallE = Rover(23, 22, 21, 20);
 
@@ -26,19 +32,18 @@ void setup() {
 String parsecmds(String response){
     
     String cmds;
-    char res[512];
     response.toCharArray(res, 512);
     Serial.println(res);
-    char* ptr = res;
-    for (int i = 0; i<=11; i++){
-        ptr++;
+    rptr = res;
+    for (int i = 0; i<=6; i++){
+        rptr++;
       }
-    while(*ptr != '<'){
-      if (*ptr != ','){
-        cmds += *ptr;
+    while(*rptr != '<'){
+      if (*rptr != ','){
+        cmds += *rptr;
       }
-      Serial.println(*ptr);
-      ptr++;
+      Serial.println(*rptr);
+      rptr++;
       }
     return cmds;
   }
@@ -77,22 +82,18 @@ void loop() {
   }
   if (!wifi.isBusy()&& millis()-lastRequest > POLLPERIOD) {
     String domain = "192.168.4.1";
-    String path = "/Rover"; 
+    String path = "/"; 
     wifi.sendRequest(GET, domain, 80, path, "RECEIVED=1");
     lastRequest = millis();
   }
   if (cmds != "No Args"){
     cmds += 'e';
-    char cms[512];
     cmds.toCharArray(cms, 512);
-    char* ptr = cms;
-    while (*ptr != 'e'){
-      RoverMove(*ptr);
-      delay(1000);
-      RoverMove('e');
-      ptr++;
+    cptr = cms;
+    while (*cptr != 'e'){
+      RoverMove(*cptr);
+      cptr++;
     }
-    
     }
 
   
