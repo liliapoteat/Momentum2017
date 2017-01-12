@@ -45,14 +45,14 @@ In setup we generally want to do things that only need to be done once on boot u
 Note that if you are defining variables this is not the place to do it. You should declare functions and variables before setup. Declaring is not the same as initialization.
 
 
-Declaring
+Declaring:
 
 ```
 int num;		//declaring a variable
 int add(int num1, int num2); //declaring a function
 ```
 
-Initialization/Assignment/Defining
+Initialization/Assignment/Defining:
 
 
 ```
@@ -63,4 +63,64 @@ int add(int num1, int num2){
 	return num1 + num2;
 }
 ```
+Initialization and assignment can happen in the setup. You would generally define your function after loop so it wouldn't be in the way.
 
+For the setup in this code, you should see this
+
+```
+Serial.begin(115200);
+wifi.begin();
+MAC = wifi.getMAC();
+wifi.connectWifi(SSID, PASSWD);
+while (!wifi.isConnected()); //wait for connection
+
+//check blocking
+pinMode(led, OUTPUT);
+```
+
+The Serial.begin() function sets things up so that you can communication with the Teensy via USB Serial. This is what lets you open up a serial monitor. Serial in general is useful for debugging. The number in the parenthesis just sets the transmission speed, often refered to as the baud rate. All you need to know here is that your serial monitor should be set to the same speed.
+
+All the lines about wifi are mentioned in the Wifi Library Page. TODO: insert link
+
+Lastly, there is the pin setup. This is used only for digital pins. In this mode the pins will only output/input a HIGH or a LOW voltage value. LOW-0, HIGH-3.3~5V
+
+###Loop
+
+The first thing you will notice is what looks like Blink.
+
+```
+digitalWrite(led, HIGH);   // turn the LED on (HIGH is the voltage level)
+  delay(BLOCKCHECK);               // wait for a second
+  digitalWrite(led, LOW);    // turn the LED off by making the voltage LOW
+  delay(BLOCKCHECK);               // wait for a second
+```
+
+This was included for debugging purposes. It allows you to tell how the Teensy is responding when nothing happens in the Serial Monitor. Maybe it is always off, it could mean that you got stuck in an infinite loop somewhere.
+
+The last part of the code is what will be the most challenging part for most people. This requires that you use the Wifi Library. 
+
+```
+if (wifi.hasResponse()) {
+    String response = wifi.getResponse();
+    Serial.print("RESPONSE: ");
+    Serial.println(response);
+    count++;
+    Serial.println(count);
+  }
+
+if (!wifi.isBusy() && millis()-lastRequest > POLLPERIOD) {
+    String domain = "192.168.4.1";
+    String path = "/"; 
+    
+    wifi.sendRequest(GET, domain, 80, path, "");
+    lastRequest = millis();
+  }
+```
+
+The game plan here is fairly straight forward. Try looking at the second if statement first. We check if the wifi is busy and if we've waited long enough since the last request. Here POLLPERIOD is used to decide how long we wait.
+
+Assuming we enter that if statement, we see domain, and path. The domain for us should always be the same as written above unless told otherwise. The path is the page you would like to visit within the domain. You can learn more about how this is relevant in the Wifi library. TODO: add link. Continuing in the code, we send a request and declare that we timestamp it by setting last Request to millis()
+
+Now back to the first if statement. This checks if a response was received. Once we do have a response, we print it and increment count; a variable that counts the number of reponses that have been received.
+
+And that's it for the basic client!
