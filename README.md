@@ -19,7 +19,9 @@ TODO: Link to parts folder with data sheets and diagrams
 * [WifiClient Example](ServerTestingESP8266/ClientTestingESP8266/README.md) - This can be used to send sensor readings to the person driving.
 * [IR Sensor Example](IRsensorReading/README.md) - This can be used to read IR sensor data.
 * [Motor Example](MotorTesting/README.md) - This can be used to get a motor running.
-* [Rover Example](RoverController/README.md) - This can be used to interface the rover with the wifi.
+* [Rover Example](RoverController/README.md) - This can be used to interface the rover with the command server.
+* [Command Server Example](CommandServer/README.md) - This can be used to interface the command server with the rover.
+* [Encoder Example](EncoderTesting/README.md) - This demonstrates the signal an encoder sends when a motor is driven.
 
 TODO: Links to various code folders
 
