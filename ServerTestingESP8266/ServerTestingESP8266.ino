@@ -1,11 +1,11 @@
 #include <Wifi_S08_v2.h>
 
-#define SSID "ESP8266"
+#define SSID "ESPeezy"
 #define PASSWD "MOMENTUM"
-#define BLINKPERIOD 1000
+#define BLINKPERIOD 100
 #define UPDATEPERIOD 1000
 
-ESP8266 wifi = ESP8266(1,false);
+ESP8266 wifi = ESP8266(1,true);
 String html = "<html>\n<title>It works!</title>\n<body>\n<h1>Congrats</h1>\n<p>You have successfully interneted.</p>\n</body>\n</html>";
 int val = 0;
 int led = 13;

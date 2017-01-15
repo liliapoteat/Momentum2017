@@ -1,12 +1,9 @@
 #include <Wifi_S08_v2.h>
 
-//#define SSID "ESP8266"
-//#define PASSWD "MOMENTUM"
-
-#define SSID "ESP8266"
+#define SSID "MARKESP"
 #define PASSWD "MOMENTUM"
 
-#define POLLPERIOD 0
+#define POLLPERIOD 1000
 #define BLOCKCHECK 100
 
 ESP8266 wifi = ESP8266(0,false);

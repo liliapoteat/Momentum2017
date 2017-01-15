@@ -4,7 +4,7 @@
 //Edited for 6.S08 Spring 2017
 
 
-#include <Wifi_S08.h>
+#include "Wifi_S08_v2.h"
 #include <WString.h>
 #include <Arduino.h>
 
@@ -21,39 +21,86 @@ const char ESP8266::STATUS[] = "STATUS:";
 const char ESP8266::ALREADY_CONNECTED[] = "ALREADY CONNECTED";
 const char ESP8266::HTML_START[] = "<html>";
 const char ESP8266::HTML_END[] = "</html>";
+const char ESP8266::SEND_FAIL[] = "SEND FAIL";
+const char ESP8266::CLOSED[] = "CLOSED";
+const char ESP8266::UNLINK[] = "UNLINK";
 
 // Constructors and init method
 ESP8266::ESP8266() {
-	init(false);	//verboseSerial is true by default
+	init(0, false);	//verboseSerial is true by default
+}
+ESP8266::ESP8266(bool verboseSerial) {
+	init(0, verboseSerial);	//verboseSerial is true by default
+}
+ESP8266::ESP8266(int mode) {
+	init(mode, false);	//verboseSerial is true by default
+}
+ESP8266::ESP8266(int mode, bool verboseSerial) {
+	init(mode, verboseSerial);	//verboseSerial is true by default
 }
 
-void ESP8266::init(bool verboseSerial) {
+void ESP8266::init(int mode, bool verboseSerial) {
 	_instance = this;  //static reference to this object, for ISR handler
-	serialYes = true;
+	serialYes = verboseSerial;
 	state = IDLE;
+	stateAP = AWAITCLIENT;
+	ESPmode = mode;
+  
 
-	hasRequest = false;
-	responseReady = false;
-	connected = false;
-	doAutoConn = true;
-	newNetworkInfo = false;
-	MAC = ""; 
+	if (ESPmode == 0){	   //Station mode
+		hasRequest = false;
+		responseReady = false;
+		connected = false;
+		doAutoConn = true;
+		newNetworkInfo = false;
+		MAC = ""; 
+		reqReconn = false;
 
-	receiveCount = 0;
-	transmitCount = 0;
+		receiveCount = 0;
+		transmitCount = 0;
 
-	ssid[0] = '\0'; 
-	password[0] = '\0';
-	response[0] = '\0';
+		ssid[0] = '\0'; 
+		password[0] = '\0';
+		response[0] = '\0';
 
-	// Default initialization of request_p, to avoid NULL pointer exception
-	request_p = (volatile Request *)malloc(sizeof(Request));
-	request_p->domain[0] = '\0';
-	request_p->path[0] = '\0';
-	request_p->data[0] = '\0';
-	request_p->port = 0;
-	request_p->type = GET_REQ;
-	request_p->auto_retry = false;
+		// Default initialization of request_p, to avoid NULL pointer exception
+		request_p = (volatile Request *)malloc(sizeof(Request));
+		request_p->domain[0] = '\0';
+		request_p->path[0] = '\0';
+		request_p->data[0] = '\0';
+		request_p->port = 0;
+		request_p->type = GET_REQ;
+		request_p->auto_retry = false;
+	}
+	else if(ESPmode == 1){  //Access Point mode
+		hasRequest = false;
+		responseReady = false;
+		newNetworkInfo = false;
+		serverStatus = false;
+
+		receiveCount = 0;
+		transmitCount = 0;
+
+		ssid[0] = '\0'; 
+		password[0] = '\0';
+		response[0] = '\0';
+
+		// Default initialization of request_p, to avoid NULL pointer exception
+		requestAP_p = (volatile RequestAP *)malloc(sizeof(RequestAP));
+		requestAP_p->path[0] = '\0';
+		requestAP_p->data[0] = '\0';
+		requestAP_p->typeAP = GET_REQ;
+
+		// Default initialization of pages
+		storedPages = (volatile Pages *)malloc(sizeof(Pages));
+		stringToVolatileArray(DEF_DIR, storedPages->directory, NUMBEROFPAGES*PAGESIZE);
+		stringToVolatileArray(DEF_HTML, storedPages->html, NUMBEROFPAGES*HTMLSTORAGE);
+		 
+		for(int i = 1;i < NUMBEROFPAGES; i++){
+			stringToVolatileArray("\0", storedPages->directory+i*PAGESIZE, NUMBEROFPAGES*PAGESIZE);
+			stringToVolatileArray("\0", storedPages->html+i*HTMLSTORAGE, NUMBEROFPAGES*HTMLSTORAGE);
+		}
+	}
 }
 
 void ESP8266::begin() {
@@ -67,9 +114,14 @@ void ESP8266::begin() {
 	wifiSerial.begin(115200);
 	while (!wifiSerial); //Loop until wifiSerial is initialized
 	if (checkPresent()) {
-		reset();
-		getMACFromDevice();
-		emptyRx();
+		if(ESPmode == 0){
+			reset();
+			getMACFromDevice();
+			emptyRx();
+		}
+		else if(ESPmode == 1){
+			startAP();
+		}
 	}
 	enableTimer();
 }
@@ -104,13 +156,11 @@ bool ESP8266::isBusy() {
 	return hasRequest;
 }
 
-void ESP8266::sendRequest(int type, String domain, int port, String path, 
-		String data) {
-	sendRequest(type, domain, port, path, data, false);
+void ESP8266::sendRequest(int type, String domain, int port, String path, String data) {
+	sendRequest(type, domain, port, path, data, true);
 }
 
-void ESP8266::sendRequest(int type, String domain, int port, String path, 
-		String data, bool auto_retry) {
+void ESP8266::sendRequest(int type, String domain, int port, String path, String data, bool auto_retry) {
 	RequestType _type;
 	if (type == GET) {
 		_type = GET_REQ;
@@ -136,7 +186,6 @@ void ESP8266::sendRequest(int type, String domain, int port, String path,
 		responseReady = false;	
 		enableTimer();
 		//benchmark = millis();
-		Serial.println("Request Sent");
 	} else if (serialYes) {
 		Serial.println("Could not make request; one is already in progress");
 	}
@@ -153,6 +202,23 @@ void ESP8266::clearRequest() {
 
 bool ESP8266::hasResponse() {
 	return responseReady;
+}
+
+String ESP8266::getData() {
+	disableTimer();
+	if(ESPmode == 1){
+		String d = "";
+		d = ((char *)requestAP_p->data);
+		enableTimer();
+		return d;
+	}
+	else{
+		if(serialYes){
+			Serial.println("getData() is not supported in client mode.");
+		}
+		enableTimer();
+		return "\0";
+	}	
 }
 
 String ESP8266::getResponse() {
@@ -188,6 +254,202 @@ bool ESP8266::restore() {
 	ok = ok && reset();
 	enableTimer();
 	return ok;
+}
+
+bool ESP8266::startAP(){
+	disableTimer();
+	bool ok = true;
+	emptyRx();
+	wifiSerial.println(AT_CWMODE_AP);
+	ok = ok && waitForTarget(OK, CWMODE_TIMEOUT);
+	if (serialYes) {
+		if (ok) {
+			Serial.println("CW_MODE: 2");
+		} else {
+			Serial.println("CW_MODE SET ERROR");
+		}
+		Serial.flush();
+	}
+	emptyRx();
+	wifiSerial.println(AT_RST);
+	ok = ok && waitForTarget(OK, RST_TIMEOUT);
+	if (serialYes) {
+		if (ok) {
+			Serial.println("Reset successful");
+		} else {
+			Serial.println("WARNING: Reset unsuccesful");
+		}
+		Serial.flush();
+	}
+	enableTimer();
+	return ok;
+}
+
+bool ESP8266::startserver(String netName, String pass){
+	disableTimer();
+	delay(500);
+	if (netName == "") {
+		if (serialYes) {
+			Serial.println("The empty string is not a valid SSID");
+		}
+		return false;
+	}
+	bool idOk = stringToVolatileArray(netName, ssid, SSIDSIZE);
+	bool passOk = stringToVolatileArray(pass, password, PASSWORDSIZE);
+	if (serialYes) {
+		if (!idOk) {
+			Serial.println("Given SSID is too long");
+		} 
+		if (!passOk) {
+			Serial.println("Given password is too long");
+		}
+	}
+	if (idOk && passOk) {
+		newNetworkInfo = true;
+	}
+	bool ok = true;
+	emptyRx();
+  	wifiSerial.print(AT_CWSAP_SET);
+  	String s = (char *)ssid;
+  	String p = (char *)password;
+	wifiSerial.println('\"' + s + '\"' + ',' + '\"' + p + '\"' + ',' + "1" + ',' + "4");
+	ok = ok && waitForTarget(OK, CWSAP_TIMEOUT);
+	emptyRx();
+	wifiSerial.println(AT_CIPMUX);
+	ok = ok && waitForTarget(OK, CIPMUX_TIMEOUT);
+	emptyRx();
+	wifiSerial.println(AT_CIPSERVER);
+	ok = ok && waitForTarget(OK, CIPSERVER_TIMEOUT);
+	emptyRx();
+	wifiSerial.println(AT_CIPAP_SET);
+	ok = ok && waitForTarget(OK, CIPAP_TIMEOUT);
+	if (serialYes) {
+		if (ok) {
+			Serial.println("Server Started");
+			serverStatus = true;
+		} else {
+			Serial.println("ERROR Starting Server");
+		}
+		Serial.flush();
+	}
+	enableTimer();
+	return ok;
+}
+
+bool ESP8266::setServer(){
+	delay(500);
+	bool ok = true;
+	emptyRx();
+  	wifiSerial.print(AT_CWSAP_SET);
+  	String s = (char *)ssid;
+  	String p = (char *)password;
+	wifiSerial.println('\"' + s + '\"' + ',' + '\"' + p + '\"' + ',' + "1" + ',' + "4");
+	ok = ok && waitForTarget(OK, CWSAP_TIMEOUT);
+	emptyRx();
+	wifiSerial.println(AT_CIPMUX);
+	ok = ok && waitForTarget(OK, CIPMUX_TIMEOUT);
+	emptyRx();
+	wifiSerial.println(AT_CIPSERVER);
+	ok = ok && waitForTarget(OK, CIPSERVER_TIMEOUT);
+	emptyRx();
+	wifiSerial.println(AT_CIPAP_SET);
+	ok = ok && waitForTarget(OK, CIPAP_TIMEOUT);
+	if (serialYes) {
+		if (ok) {
+			Serial.println("Server Started");
+			serverStatus = true;
+		} else {
+			Serial.println("ERROR Starting Server");
+		}
+		Serial.flush();
+	}
+	return ok;
+}
+
+void ESP8266::setPage(String directory, String html){
+	if (directory.length() > PAGESIZE){
+		if(serialYes){
+			Serial.println();
+			Serial.print("Directory name too long.");
+		}
+	}
+	else if (pageExists(directory)){
+		pageStore(storedPages->directory, directory, html);
+		if(serialYes){
+			Serial.println();
+			Serial.println("Page set.");
+		}
+	}
+	else if(pagesAvailable()){
+		pageCreate(storedPages->directory,directory);
+		pageStore(storedPages->directory, directory, html);
+		if(serialYes){
+			Serial.println();
+			Serial.print("Page created.");
+		}
+	}
+	else{
+		if(serialYes){
+			Serial.println();
+			Serial.println("No more pages can be set");
+		}
+	}
+}
+
+//creates the page
+void ESP8266::pageCreate(volatile char arr[], String directory){
+	for(int i = 0; i < NUMBEROFPAGES; i++){
+		String cmp = arr[i*PAGESIZE];
+		if(cmp == "\0"){
+			for(unsigned int c = 0;c < directory.length()+1;c++){
+				arr[i*PAGESIZE + c] = directory[c];
+			}
+			break;
+		}
+	}
+
+}
+
+//stores the html with the coresponding directory
+void ESP8266::pageStore(volatile char arr[], String dir, String html){
+	for(int i = 0; i < NUMBEROFPAGES; i++){
+		String cmp = arr[i*PAGESIZE];
+		if(cmp == dir){
+			for(unsigned int c = 0;c < html.length()+1;c++){
+				storedPages->html[i*HTMLSTORAGE+c] = html[c];
+			}
+		}
+	}
+}
+
+//checks if a page exists
+bool ESP8266::pageExists(String directory){
+	for(int i = 0; i < NUMBEROFPAGES; i++){
+		String cmp = (char *)(storedPages->directory+i*PAGESIZE);
+		if(cmp == directory){
+			return true;
+		}
+	}
+	if(serialYes){
+		Serial.println();
+		Serial.println("Page does not Exist.");
+	}
+	return false;
+}
+
+//checks if more pages can be stored
+bool ESP8266::pagesAvailable(){
+	for(int i = 0; i < NUMBEROFPAGES; i++){
+		String cmp = (char *)(storedPages->directory+i*PAGESIZE);
+		if(cmp == "\0"){
+			return true;
+		}
+	}
+	if(serialYes){
+		Serial.println();
+		Serial.println("Page array is full.");
+	}
+	return false;
 }
 
 bool ESP8266::reset() {
@@ -256,7 +518,12 @@ void ESP8266::resetReceiveCount() {
 
 //// PRIVATE FUNCTIONS (Non-ISR only)
 void ESP8266::enableTimer() {
-	timer.begin(ESP8266::handleInterrupt, INTERRUPT_MICROS);
+  if (ESPmode == 0){
+	  timer.begin(ESP8266::handleInterrupt, INTERRUPT_MICROS);
+  }
+  else if (ESPmode == 1){
+    timer.begin(ESP8266::handleInterruptAP, INTERRUPT_MICROS_AP);
+  }
 }
 
 void ESP8266::disableTimer() {
@@ -314,10 +581,7 @@ void ESP8266::getMACFromDevice() {
 // Empty wifi serial buffer
 void ESP8266::emptyRx() {
 	while (wifiSerial.available() > 0) {
-		char c = wifiSerial.read();
-		if (serialYes) {
-			Serial.print(c);
-		}
+		wifiSerial.read();
 	}
 }
 
@@ -326,12 +590,14 @@ void ESP8266::emptyRx() {
 bool ESP8266::waitForTarget(const char *target, unsigned long timeout) {
 	String resp = "";
 	unsigned long start = millis();
+	if (serialYes) {
+		Serial.println();
+		Serial.print("Waiting for ");
+		Serial.println(target);
+	}
 	while (millis() - start < timeout) {
 		if (wifiSerial.available() > 0) {
 			char c = wifiSerial.read();
-			if (serialYes) {
-				Serial.print(c);
-			}
 			resp = String(resp+c);
 			if (resp.endsWith(target)) {
 				if (serialYes) {
@@ -345,8 +611,7 @@ bool ESP8266::waitForTarget(const char *target, unsigned long timeout) {
 }
 
 
-bool ESP8266::stringToVolatileArray(String str, volatile char arr[],
-	   	uint32_t len) {
+bool ESP8266::stringToVolatileArray(String str, volatile char arr[], uint32_t len) {
 	if (str.length() >= (len - 1)) { //string is too long
 		return false;
 	}
@@ -360,8 +625,14 @@ bool ESP8266::stringToVolatileArray(String str, volatile char arr[],
 //// PRIVATE FUNCTIONS (ISR - no String class allowed)
 // Static handler calls singleton instance's handler
 void ESP8266::handleInterrupt(void) {
-	_instance->processInterrupt();
+		_instance->processInterrupt();
 }
+
+void ESP8266::handleInterruptAP(void) {
+		_instance->processInterruptAP();
+}
+
+
 
 // Main interrupt handler, ISR activity follows an FSM pattern
 void ESP8266::processInterrupt() {
@@ -369,7 +640,7 @@ void ESP8266::processInterrupt() {
 		case IDLE:
 			{
 			bool autoCheck = doAutoConn
-				&& (millis() - lastConnectionCheck > CONNCHECK_TIMEOUT);
+				&& (millis() - lastConnectionCheck > CONNCHECK_TIMEOUT || reqReconn);
 			if (ssid[0] != '\0' && (newNetworkInfo || autoCheck)) {
 				// If we have an SSID, and it's new (or it's time to refresh),
 				// then check network connection and reconnect if needed
@@ -389,6 +660,7 @@ void ESP8266::processInterrupt() {
 				responseReady = false;
 				state = CIPSTART;
 			}
+			reqReconn = false;
 			}	
 			break;
 		case CIPSTATUS:
@@ -400,10 +672,13 @@ void ESP8266::processInterrupt() {
 					}
 					lastConnectionCheck = millis();
 					connected = false;
+					reqReconn = true;
+					emptyRxAndBuffer();
 					state = IDLE;
 				} else if (status == 2 || status == 3 || status == 4) {
 					lastConnectionCheck = millis();
 					connected = true;
+					emptyRxAndBuffer();
 					state = IDLE; // Connection ok, return to idle
 				} else {
 					if (serialYes) {
@@ -422,10 +697,14 @@ void ESP8266::processInterrupt() {
 				}
 			} else if (isTargetInResp(ERROR)) {
 				if (serialYes) {
+					Serial.println(debugCount);
+					debugCount = 0;
 					Serial.println("\nCouldn't determine connection status");
 				}
 				lastConnectionCheck = millis();
 				connected = false;
+				reqReconn = true;
+				emptyRxAndBuffer();
 				state = IDLE;
 			} else if (millis() - timeoutStart > CIPSTATUS_TIMEOUT) {
 				if (serialYes) {
@@ -433,6 +712,8 @@ void ESP8266::processInterrupt() {
 				}
 				lastConnectionCheck = millis();
 				connected = false;
+				reqReconn = true;
+				emptyRxAndBuffer();
 				state = IDLE;	// Hopefully it'll work next time
 			}	
 			break;
@@ -440,21 +721,25 @@ void ESP8266::processInterrupt() {
 			if (isTargetInResp(OK)) {
 				lastConnectionCheck = millis(); //Connection succeeded
 				connected = true;
+				emptyRxAndBuffer();
 				state = IDLE;
 			} else if (isTargetInResp(FAIL)) {
 				lastConnectionCheck = millis();
+				emptyRxAndBuffer();
 				state = IDLE;
 			} else if (isTargetInResp(ERROR)) { //This shouldn't happen
 				if (serialYes) {
 					Serial.println("\nMalformed CWJAP instruction");
 				}
 				lastConnectionCheck = millis();
+				emptyRxAndBuffer();
 				state = IDLE;
 			} else if (millis() - timeoutStart > CWJAP_TIMEOUT) {
 				if (serialYes) {
 					Serial.println("\nCWJAP instruction timed out");
 				}
 				lastConnectionCheck = millis();
+				emptyRxAndBuffer();
 				state = IDLE;
 			}
 			break;
@@ -485,12 +770,14 @@ void ESP8266::processInterrupt() {
 				if (serialYes) {
 					Serial.println("Could not make TCP connection");
 				}
+				emptyRxAndBuffer();
 				hasRequest = request_p->auto_retry;
 				state = IDLE;
 			} else if (millis() - timeoutStart > CIPSTART_TIMEOUT) {
 				if (serialYes) {
 					Serial.println("TCP connection attempt timed out");
 				}
+				emptyRxAndBuffer();
 				hasRequest = request_p->auto_retry;
 				state = IDLE;
 			}
@@ -565,11 +852,13 @@ void ESP8266::processInterrupt() {
 			break;
 		case DATAOUT:
 			if (isTargetInResp(SEND_OK)) {
+				emptyRxAndBuffer();
 				timeoutStart = millis();
 				transmitCount++; // ESP8266 has successfully sent request out into the world
 				state = AWAITRESPONSE;
 				benchmark = millis();
 			} else if (isTargetInResp(ERROR)) {
+				emptyRxAndBuffer();
 				if (serialYes) {
 					Serial.println("Problem sending HTTP data");
 				}
@@ -577,37 +866,329 @@ void ESP8266::processInterrupt() {
 				hasRequest = request_p->auto_retry;
 				state = IDLE;
 			} else if (millis() - timeoutStart > DATAOUT_TIMEOUT) {
+				emptyRxAndBuffer();
 				if (serialYes) {
 					Serial.println("Timeout while confirming HTTP send");
 				}
 				wifiSerial.println(AT_CIPCLOSE);
 				hasRequest = request_p->auto_retry;
 				state = IDLE;
-			}	
-			break;
-		case AWAITRESPONSE:
-			if (isTargetInResp(HTML_END)) {
-				benchmark = millis() - benchmark;
-				Serial.println(benchmark);
-				getStringFromResp(HTML_START, HTML_END, (char *)response);
+			} else if (isTargetInResp(SEND_FAIL)){
+				emptyRxAndBuffer();
 				if (serialYes) {
-					Serial.println("Got HTTP response!");
-				}
-				wifiSerial.println(AT_CIPCLOSE);
-				hasRequest = false; //We're done with this request
-				responseReady = true;
-				receiveCount++;	// ESP8266 has successfully received a response from the web
-				state = IDLE;
-			} else if (millis() - timeoutStart > HTTP_TIMEOUT) {
-				if (serialYes) {
-					Serial.println("HTTP timeout");
+					Serial.println("Failed to send HTTP");
 				}
 				wifiSerial.println(AT_CIPCLOSE);
 				hasRequest = request_p->auto_retry;
 				state = IDLE;
 			}
 			break;
+		case AWAITRESPONSE:
+			if (isTargetInResp(HTML_END)) {
+				benchmark = millis() - benchmark;
+				getStringFromResp(HTML_START, HTML_END, (char *)response);
+				if (serialYes) {
+					Serial.println("Got HTTP response!");
+					Serial.print("Response speed: ");
+					Serial.println(benchmark);
+				}
+				wifiSerial.println(AT_CIPCLOSE);
+				hasRequest = false; //We're done with this request
+				responseReady = true;
+				receiveCount++;	// ESP8266 has successfully received a response from the web
+				debugCount++;
+				emptyRxAndBuffer();
+				state = IDLE;
+			} else if (millis() - timeoutStart > HTTP_TIMEOUT && !isTargetInResp(IPD)) {
+				if (serialYes) {
+					Serial.println(debugCount);
+					debugCount = 0;
+					Serial.println("HTTP timeout");
+				}
+				wifiSerial.println(AT_CIPCLOSE);
+				hasRequest = request_p->auto_retry;
+				emptyRxAndBuffer();
+				state = IDLE;
+			} else if (isTargetInResp(CLOSED)){
+				hasRequest = request_p->auto_retry;
+				emptyRxAndBuffer();
+				state = IDLE;
+			}
+			break;
 	}
+}
+
+//Main interrupt handler for Access Point Mode
+void ESP8266::processInterruptAP(){
+	switch(stateAP) {
+		case RESET:
+			{
+			if(isTargetInResp(ERROR)){
+				if (serialYes){
+					Serial.println("Server Disconnected");
+					Serial.println("Attempting to restart the server");
+				}
+				setServer();
+				if(serverStatus){
+				stateAP = AWAITCLIENT;
+				}
+			}
+			else{
+				stateAP = AWAITCLIENT;
+				timeoutStart = millis();
+				serverStatus = true;
+			}
+			break;
+			}
+		case AWAITCLIENT:
+			{
+			// get link id
+			if(getStringFromResp("IPD",":",(char *)response)){
+				String resp = (char *)response;
+		        
+		        linkID = int(resp[4]) - 48;
+
+		        if (serialYes){
+
+			        Serial.println();
+			        Serial.print("linkID: ");
+			        Serial.println(linkID);
+			        Serial.print("resp: ");
+			        Serial.println(resp);
+
+		    	}
+		    	timeoutStart = millis();
+		    	first = true;
+		        stateAP = AWAITREQUEST;
+		        responseReady = true;
+		    }
+			else if(getStringFromResp("PD",":",(char *)response)){
+		        String resp = (char *)response;
+		        
+		        linkID = int(resp[3]) - 48;
+
+		        if (serialYes){
+
+			        Serial.println();
+			        Serial.print("linkID: ");
+			        Serial.println(linkID);
+			        Serial.print("resp: ");
+			        Serial.println(resp);
+
+		    	}
+		    	timeoutStart = millis();
+		    	first = true;
+		        stateAP = AWAITREQUEST;
+		        responseReady = true;
+		    }
+		    /*else if(millis() - timeoutStart > CHECK_TIMEOUT || serverStatus == false){
+		    	emptyRxAndBuffer();
+		    	wifiSerial.println(AT_CWSAP_GET);
+		    	stateAP = RESET;
+		    }*/
+			else {
+	    		if (serialYes and first){
+		    		first = false;
+		    		Serial.println();
+		    		Serial.println("ESP8266 AWAITCLIENT");
+	    		}
+	    	}
+			break;
+			}
+	    case AWAITREQUEST:
+	     {
+			if (getStringFromResp("POST", "Host",(char *)response)){
+				String resp = (char *)response;
+				requestAP_p->typeAP = POST_REQ;
+				requestParse(resp);
+				timeoutStart = millis();
+				first = true;
+				stateAP = SENDRESPONSE;
+			}
+			else if (getStringFromResp("GET", "Host",(char *)response)){
+				String resp = (char *)response;
+				requestAP_p->typeAP = GET_REQ;
+				requestParse(resp);
+				timeoutStart = millis();
+				first = true;
+				stateAP = SENDRESPONSE;
+			}
+			else if ((millis()-timeoutStart) > AWAITREQUEST_TIMEOUT){
+				if (serialYes){		        	
+				  Serial.println();
+				  Serial.println("Received an incomplete request");
+				}
+				stateAP = AWAITCLIENT;
+			}
+		break;
+		}
+	    case SENDRESPONSE:
+	    {	
+	    	if(first){
+	    		wifiSerial.print(AT_CIPSEND);
+				wifiSerial.print(linkID);
+		    	findPage();
+		    	first = false;
+	    	}
+	    	if(isTargetInResp(OK_PROMPT)){
+	    		emptyRxAndBuffer();
+	    		servePage();
+	    		if (serialYes){
+	    			Serial.println();
+	    			Serial.println("Got prompt");
+	    		}
+	    		timeoutStart = millis();
+	    		first = true;
+	    		stateAP = DATAOUTAP;
+	    	}
+	    	else if(isTargetInResp(ERROR)){
+	    		emptyRxAndBuffer();
+	    		stateAP = CLOSE;
+	    	}
+	    	else if (millis() - timeoutStart > SENDRESPONSE_TIMEOUT){
+		    	timeoutStart = millis();
+		    	stateAP = AWAITREQUEST;
+	    		if (serialYes){
+	    			Serial.println();
+	    			Serial.println("CIPSEND TIMEOUT");
+	    		}
+	    	}
+	    break;
+	    }
+	    case DATAOUTAP:
+	    {
+			if(isTargetInResp(SEND_OK)){
+	    		emptyRxAndBuffer();
+	 			timeoutStart = millis();
+	    		stateAP = CLOSE;
+	    		if (serialYes){
+	    			Serial.println();
+	    			Serial.println("CIPSEND COMPLETE");
+	    		}
+	    	}
+	    	else if (millis() - timeoutStart > CIPSEND_TIMEOUT){
+	    		emptyRxAndBuffer();
+	    		first = true;
+	    		stateAP = AWAITCLIENT;
+	    		timeoutStart = millis();
+	    		if (serialYes){
+	    			Serial.println();
+	    			Serial.println("CIPSEND ERROR");
+	    		}
+	    	}
+	    break;
+	    }
+	    case CLOSE:
+	    {
+	    	if(isTargetInResp(CLOSED)){
+	    		emptyRxAndBuffer();
+	    		timeoutStart = millis();
+	    		stateAP = AWAITCLIENT;
+	    	}
+	    	if(isTargetInResp(OK)){
+	    		emptyRxAndBuffer();
+	    		timeoutStart = millis();
+	    		stateAP = AWAITCLIENT;
+    		}
+    		if(isTargetInResp(UNLINK)){
+    			emptyRxAndBuffer();
+	    		timeoutStart = millis();
+	    		stateAP = AWAITCLIENT;
+    		}
+    		else if (millis() - timeoutStart > CLOSE_TIMEOUT){
+    			wifiSerial.print(AT_CIPCLOSE_AP);
+	    		wifiSerial.println(linkID);
+	    		timeoutStart = millis();
+    		}
+	    }
+	   
+	}
+}
+
+//finds the page to serve and sends the length of the page as a CIPSEND parameter
+void ESP8266::findPage(){
+	//check if the requested path has an assigned page
+	String s= (char *)requestAP_p->path;
+	if(pageExists(s) == false){
+		//if not set the page to the default
+		s = "default";
+		stringToVolatileArray(s, requestAP_p->path, PATHSIZE);
+	}
+
+	String h = getPage(s);
+	
+	//count the length of the html
+	char c = ' ';
+	int len = 0;
+	while (c!='\0'){
+		c = h[len];
+		len++;
+	}
+	len--;
+	wifiSerial.print(",");
+	wifiSerial.println(len);
+	return;
+}
+
+//gets the html for the given directory
+String ESP8266::getPage(String dir){
+	for(int i = 0; i < NUMBEROFPAGES; i++){
+		String cmp = (char *)(storedPages->directory+i*PAGESIZE);
+		if(cmp == dir){
+			return (char *)(storedPages->html+i*HTMLSTORAGE);
+		}
+	} 
+	if(serialYes){
+		Serial.println("There was an error getting the page requested.");
+	}
+	return (char *)storedPages->html;
+}
+
+//serves the page requested
+void ESP8266::servePage(){
+	String s = (char *)requestAP_p->path;
+	String h = getPage(s);
+	//String html = "<html>\n<title>It works!</title>\n<body>\n<h1>Congrats</h1>\n<p>You have successfully interneted.</p>\n</body>\n</html>";
+	wifiSerial.println(h);
+}
+
+// Parses the response and stores the path and data into requestAP_p struct
+void ESP8266::requestParse(String resp){
+	String pathtmp;
+	String datatmp;
+    char res[512];
+    resp.toCharArray(res, 512);
+    char* ptr = res;
+    while(*ptr != ' '){
+        ptr++;
+      }
+      ptr++;
+    while(*ptr != '?' && *ptr != ' '){
+      pathtmp += *ptr;
+      ptr++;
+      }
+    while(*ptr != ' '){
+      datatmp += *ptr;
+      ptr++;
+    }
+
+    stringToVolatileArray(pathtmp, requestAP_p->path, PATHSIZE);
+
+    if (datatmp != "\0"){
+    	stringToVolatileArray(datatmp, requestAP_p->data, DATASIZE);
+    }
+    if(serialYes){
+    	Serial.println();
+    	Serial.print("Path: ");
+    	Serial.println((char *)requestAP_p->path);
+    	Serial.print("Data: ");
+    	if (datatmp == "\0"){
+    		Serial.println("No Data");
+	    }
+	    else{
+	    	Serial.println((char *)requestAP_p->data);
+	    }
+    }
 }
 
 // Returns true if and only if target is in inputBuffer
@@ -636,8 +1217,7 @@ bool ESP8266::getStringFromResp(const char *target, char *result) {
 // the start target is before the end target, this method loads the characters
 // in between (including both targets) into result array and returns true.
 // Otherwise, returns false. 
-bool ESP8266::getStringFromResp(const char*startTarget, const char*endTarget,
-		char *result) {
+bool ESP8266::getStringFromResp(const char*startTarget, const char*endTarget, char *result) {
 	loadRx();
 	char *startLoc = strstr((char *)inputBuffer, startTarget);
 	char *endLoc = strstr((char *)inputBuffer, endTarget);
@@ -691,14 +1271,14 @@ int ESP8266::getStatusFromResp() {
 // Load wifi serial buffer into character array (inputBuffer)
 void ESP8266::loadRx() {
 	int buffIndex = strlen((char *)inputBuffer);
-	while (wifiSerial.available() > 0 && buffIndex < BUFFERSIZE-1) {
-		char c = wifiSerial.read();
-		if (serialYes) {
-			Serial.print(c);
-		}
-		inputBuffer[buffIndex] = c;
-		inputBuffer[buffIndex+1] = '\0';
-		buffIndex++;
+	while (wifiSerial.available() > 0 && buffIndex < BUFFERSIZE-1) {	
+			char c = wifiSerial.read();
+			if (serialYes) {
+				Serial.print(c);
+			}
+			inputBuffer[buffIndex] = c;
+			inputBuffer[buffIndex+1] = '\0';
+			buffIndex++;
 	}
 	if (buffIndex >= BUFFERSIZE -1) {
 		if (serialYes) {

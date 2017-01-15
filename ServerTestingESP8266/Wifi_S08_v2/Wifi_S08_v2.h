@@ -32,7 +32,8 @@
 #define HTMLSTORAGE 1024
 
 // Timing constants
-#define INTERRUPT_MICROS 50000
+#define INTERRUPT_MICROS 1000
+#define INTERRUPT_MICROS_AP 500
 #define AT_TIMEOUT 1000
 #define MAC_TIMEOUT 1000
 #define CWMODE_TIMEOUT 1000
@@ -43,12 +44,17 @@
 #define CIPSTATUS_TIMEOUT 5000
 #define CWJAP_TIMEOUT 15000
 #define CIPSTART_TIMEOUT 15000
-#define CIPSEND_TIMEOUT 5000
+#define CIPSEND_TIMEOUT 1000
 #define DATAOUT_TIMEOUT 5000
 #define HTTP_TIMEOUT 500
-#define SENDRESPONSE_TIMEOUT 5000
-#define CLOSE_TIMEOUT 1000
-
+#define SENDRESPONSE_TIMEOUT 1000
+#define CLOSE_TIMEOUT 10000
+#define AWAITREQUEST_TIMEOUT 1000
+#define CWSAP_TIMEOUT 5000
+#define CIPMUX_TIMEOUT 5000
+#define CIPSERVER_TIMEOUT 5000
+#define CIPAP_TIMEOUT 5000
+#define CHECK_TIMEOUT 1000
 
 // AT Commands, some of which require appended arguments
 #define AT_BASIC "AT"
@@ -67,7 +73,7 @@
 #define AT_CWMODE_AP "AT+CWMODE_DEF=2"
 #define AT_CWSAP_SET "AT+CWSAP="
 #define AT_CWSAP_GET "AT+CWSAP?"
-#define AT_CIPAP_SET "AT+CIPAP="
+#define AT_CIPAP_SET "AT+CIPAP=\"192.168.4.1\""
 #define AT_CIPAP_GET "AT+CIPAP?"
 #define AT_CIPMUX "AT+CIPMUX=1"
 #define AT_CIPSERVER "AT+CIPSERVER=1,80"
@@ -75,6 +81,7 @@
 #define AT_CWLIF "AT+CWLIF"
 #define IPD "+IPD"
 #define AT_CIPCLOSE_AP "AT+CIPCLOSE="
+
 
 // default html page to display
 #define DEF_DIR "default,"
@@ -108,7 +115,7 @@ class ESP8266 {
 		void begin();
 		bool isConnected();
 		void connectWifi(String ssid, String password);
-		bool startserver(String netName, String password);
+		bool startserver(String netName, String pass);
 		bool isBusy();
 		void sendRequest(int type, String domain, int port, String path, 
 				String data);
@@ -129,6 +136,7 @@ class ESP8266 {
 		void resetTransmitCount();
 		int getReceiveCount();
 		void resetReceiveCount();
+		String getData();
 
 	private:
 		static ESP8266 * _instance; //Static instance of this singleton class
@@ -177,6 +185,7 @@ class ESP8266 {
 			AWAITRESPONSE, //awaiting HTTP response
 		};
 		enum StateAP {
+			RESET,
 			AWAITCLIENT,
 			AWAITREQUEST, //awaiting client request
 			SENDRESPONSE, //return a response
@@ -217,6 +226,7 @@ class ESP8266 {
 		void requestParse(String resp);
 		void findPage();
 		void servePage();
+		bool setServer();
 
 
 		// Non-ISR variables
@@ -238,6 +248,7 @@ class ESP8266 {
 		volatile char response[RESPONSESIZE];
 		volatile int transmitCount;
 		volatile int receiveCount;
+		volatile bool reqReconn;
 
 	    //Shared variables for AP
 	    volatile int linkID;
@@ -245,6 +256,7 @@ class ESP8266 {
 		volatile RequestAP *requestAP_p;
 	    volatile int debugCount;
 	    volatile bool first;
+	    volatile bool serverStatus;
 
 		// Variables for interrupt routines
 		volatile State state;

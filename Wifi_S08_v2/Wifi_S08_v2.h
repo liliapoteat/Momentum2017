@@ -8,8 +8,8 @@
 // file 'serial1.c' and change the value of the macro RX_BUFFER_SIZE from 64
 // to something larger, like 1024
 
-#ifndef Wifi_S08_H
-#define Wifi_S08_H
+#ifndef Wifi_S08_v2_H
+#define Wifi_S08_v2_H
 #endif
 
 #define ESP_VERSION "1.5"
@@ -19,17 +19,21 @@
 #define POST 1
 
 // Sizes of character arrays
-#define BUFFERSIZE 8192
-#define RESPONSESIZE 8192
+#define BUFFERSIZE 4096
+#define RESPONSESIZE 4096
 #define MACSIZE 17
 #define SSIDSIZE 32
 #define PASSWORDSIZE 64
 #define DOMAINSIZE 256
 #define PATHSIZE 256
 #define DATASIZE 1024
+#define NUMBEROFPAGES 8
+#define PAGESIZE 64
+#define HTMLSTORAGE 1024
 
 // Timing constants
-#define INTERRUPT_MICROS 50000
+#define INTERRUPT_MICROS 1000
+#define INTERRUPT_MICROS_AP 500
 #define AT_TIMEOUT 1000
 #define MAC_TIMEOUT 1000
 #define CWMODE_TIMEOUT 1000
@@ -40,9 +44,17 @@
 #define CIPSTATUS_TIMEOUT 5000
 #define CWJAP_TIMEOUT 15000
 #define CIPSTART_TIMEOUT 15000
-#define CIPSEND_TIMEOUT 5000
+#define CIPSEND_TIMEOUT 1000
 #define DATAOUT_TIMEOUT 5000
-#define HTTP_TIMEOUT 12000
+#define HTTP_TIMEOUT 500
+#define SENDRESPONSE_TIMEOUT 1000
+#define CLOSE_TIMEOUT 10000
+#define AWAITREQUEST_TIMEOUT 1000
+#define CWSAP_TIMEOUT 5000
+#define CIPMUX_TIMEOUT 5000
+#define CIPSERVER_TIMEOUT 5000
+#define CIPAP_TIMEOUT 5000
+#define CHECK_TIMEOUT 1000
 
 // AT Commands, some of which require appended arguments
 #define AT_BASIC "AT"
@@ -56,6 +68,24 @@
 #define AT_CIPSTART "AT+CIPSTART=\"TCP\","
 #define AT_CIPSEND "AT+CIPSEND="
 #define AT_CIPCLOSE "AT+CIPCLOSE"
+
+// AT Commands, for access point setup and operation
+#define AT_CWMODE_AP "AT+CWMODE_DEF=2"
+#define AT_CWSAP_SET "AT+CWSAP="
+#define AT_CWSAP_GET "AT+CWSAP?"
+#define AT_CIPAP_SET "AT+CIPAP=\"192.168.4.1\""
+#define AT_CIPAP_GET "AT+CIPAP?"
+#define AT_CIPMUX "AT+CIPMUX=1"
+#define AT_CIPSERVER "AT+CIPSERVER=1,80"
+#define AT_CWDHCP "AT+CWDHCP=0,0"
+#define AT_CWLIF "AT+CWLIF"
+#define IPD "+IPD"
+#define AT_CIPCLOSE_AP "AT+CIPCLOSE="
+
+
+// default html page to display
+#define DEF_DIR "default,"
+#define DEF_HTML "<html>\n<title>Page Error</title>\n<body>\n<h1>Page not set</h1>\n<p>The page you requested was not found</p>\n</body>\n</html>"
 
 #define HTTP_POST "POST "
 #define HTTP_GET "GET "
@@ -79,9 +109,13 @@ class ESP8266 {
 	public:
 		ESP8266();
 		ESP8266(bool verboseSerial);
+		ESP8266(int mode);
+		ESP8266(int mode, bool verboseSerial);
+		void setPage(String directory, String html);
 		void begin();
 		bool isConnected();
 		void connectWifi(String ssid, String password);
+		bool startserver(String netName, String pass);
 		bool isBusy();
 		void sendRequest(int type, String domain, int port, String path, 
 				String data);
@@ -102,6 +136,7 @@ class ESP8266 {
 		void resetTransmitCount();
 		int getReceiveCount();
 		void resetReceiveCount();
+		String getData();
 
 	private:
 		static ESP8266 * _instance; //Static instance of this singleton class
@@ -117,6 +152,9 @@ class ESP8266 {
 		static char const ALREADY_CONNECTED[];
 		static char const HTML_START[];
 		static char const HTML_END[];
+		static char const SEND_FAIL[];
+		static char const CLOSED[];
+		static char const UNLINK[];
 
 		// Private enums and structs
 		enum RequestType {GET_REQ, POST_REQ};
@@ -128,6 +166,15 @@ class ESP8266 {
 			volatile RequestType type;
 			volatile bool auto_retry;
 		};
+		struct RequestAP {
+			volatile RequestType typeAP;
+			volatile char path[PATHSIZE];
+			volatile char data[DATASIZE];
+		};
+		struct Pages {
+			volatile char directory[NUMBEROFPAGES*PAGESIZE];
+			volatile char html[NUMBEROFPAGES*HTMLSTORAGE];
+		};
 		enum State {
 			IDLE, //When nothing is happening
 			CIPSTATUS, //awaiting CIPSTATUS response
@@ -137,20 +184,37 @@ class ESP8266 {
 			DATAOUT, //awaiting "SEND OK" confirmation
 			AWAITRESPONSE, //awaiting HTTP response
 		};
+		enum StateAP {
+			RESET,
+			AWAITCLIENT,
+			AWAITREQUEST, //awaiting client request
+			SENDRESPONSE, //return a response
+			DATAOUTAP, //awaiting "SEND OK" confirmation
+			CLOSE, //close the connection
+		};
 
 		// Functions for strictly non-ISR context
 		void enableTimer();
 		void disableTimer();
-		void init(bool verboseSerial);
+		void init(int mode, bool verboseSerial);
 		bool checkPresent();
+		bool startAP();
 		void getMACFromDevice();
 		bool waitForTarget(const char *target, unsigned long timeout);
 		bool stringToVolatileArray(String str, volatile char arr[], 
 				uint32_t len);
+		bool pagesAvailable();
+		bool pageExists(String directory);
+		String getPage(String dir);
+		void pageCreate(volatile char arr[], String directory);
+		void pageStore(volatile char arr[], String dir, String html);
+
 
 		// Functions for ISR context
 		static void handleInterrupt(void);
+    	static void handleInterruptAP(void);
 		void processInterrupt();
+    	void processInterruptAP();
 		bool isTargetInResp(const char target[]);
 		bool getStringFromResp(const char *target, char *result);
 		bool getStringFromResp(const char *startTarget, const char *endTarget,
@@ -159,10 +223,17 @@ class ESP8266 {
 		void loadRx();
 		void emptyRx();
 		void emptyRxAndBuffer();
+		void requestParse(String resp);
+		void findPage();
+		void servePage();
+		bool setServer();
+
 
 		// Non-ISR variables
 		String MAC;
 		IntervalTimer timer;
+		int ESPmode;
+
 
 		// Shared variables between user calls and interrupt routines
 		volatile bool serialYes;
@@ -177,10 +248,19 @@ class ESP8266 {
 		volatile char response[RESPONSESIZE];
 		volatile int transmitCount;
 		volatile int receiveCount;
-	
-		
+		volatile bool reqReconn;
+
+	    //Shared variables for AP
+	    volatile int linkID;
+	    volatile Pages *storedPages;
+		volatile RequestAP *requestAP_p;
+	    volatile int debugCount;
+	    volatile bool first;
+	    volatile bool serverStatus;
+
 		// Variables for interrupt routines
 		volatile State state;
+		volatile StateAP stateAP;
 		volatile unsigned long lastConnectionCheck;
 		volatile unsigned long timeoutStart;
 		volatile char inputBuffer[BUFFERSIZE];	// Serial input loaded here
