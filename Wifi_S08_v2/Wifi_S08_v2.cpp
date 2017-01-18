@@ -73,7 +73,7 @@ void ESP8266::init(int mode, bool verboseSerial) {
 		request_p->auto_retry = false;
 	}
 	else if(ESPmode == 1){  //Access Point mode
-		hasRequest = false;
+		hasRequest = true;
 		responseReady = false;
 		newNetworkInfo = false;
 		serverStatus = false;
@@ -205,20 +205,27 @@ bool ESP8266::hasResponse() {
 }
 
 String ESP8266::getData() {
-	disableTimer();
-	if(ESPmode == 1){
-		String d = "";
-		d = ((char *)requestAP_p->data);
-		enableTimer();
-		return d;
+	if(!hasRequest){
+		disableTimer();
+		if(ESPmode == 1){
+			String d = "";
+			d = ((char *)requestAP_p->data);
+			requestAP_p->data[0] = '\0';
+			hasRequest = true;
+			enableTimer();
+			return d;
+		}
+		else{
+			if(serialYes){
+				Serial.println("getData() is not supported in client mode.");
+			}
+			enableTimer();
+			return "\0";
+		}	
 	}
 	else{
-		if(serialYes){
-			Serial.println("getData() is not supported in client mode.");
-		}
-		enableTimer();
-		return "\0";
-	}	
+		return"\0";
+	}
 }
 
 String ESP8266::getResponse() {
@@ -367,32 +374,36 @@ bool ESP8266::setServer(){
 }
 
 void ESP8266::setPage(String directory, String html){
-	if (directory.length() > PAGESIZE){
-		if(serialYes){
-			Serial.println();
-			Serial.print("Directory name too long.");
+	if(hasRequest){
+		disableTimer();	
+		if (directory.length() > PAGESIZE){
+			if(serialYes){
+				Serial.println();
+				Serial.print("Directory name too long.");
+			}
 		}
-	}
-	else if (pageExists(directory)){
-		pageStore(storedPages->directory, directory, html);
-		if(serialYes){
-			Serial.println();
-			Serial.println("Page set.");
+		else if (pageExists(directory)){
+			pageStore(storedPages->directory, directory, html);
+			if(serialYes){
+				Serial.println();
+				Serial.println("Page set.");
+			}
 		}
-	}
-	else if(pagesAvailable()){
-		pageCreate(storedPages->directory,directory);
-		pageStore(storedPages->directory, directory, html);
-		if(serialYes){
-			Serial.println();
-			Serial.print("Page created.");
+		else if(pagesAvailable()){
+			pageCreate(storedPages->directory,directory);
+			pageStore(storedPages->directory, directory, html);
+			if(serialYes){
+				Serial.println();
+				Serial.print("Page created.");
+			}
 		}
-	}
-	else{
-		if(serialYes){
-			Serial.println();
-			Serial.println("No more pages can be set");
+		else{
+			if(serialYes){
+				Serial.println();
+				Serial.println("No more pages can be set");
+			}
 		}
+		enableTimer();
 	}
 }
 
@@ -944,6 +955,7 @@ void ESP8266::processInterruptAP(){
 			{
 			// get link id
 			if(getStringFromResp("IPD",":",(char *)response)){
+				hasRequest = true;
 				String resp = (char *)response;
 		        
 		        linkID = int(resp[4]) - 48;
@@ -963,6 +975,7 @@ void ESP8266::processInterruptAP(){
 		        responseReady = true;
 		    }
 			else if(getStringFromResp("PD",":",(char *)response)){
+		        hasRequest = true;
 		        String resp = (char *)response;
 		        
 		        linkID = int(resp[3]) - 48;
@@ -1047,7 +1060,7 @@ void ESP8266::processInterruptAP(){
 	    	}
 	    	else if (millis() - timeoutStart > SENDRESPONSE_TIMEOUT){
 		    	timeoutStart = millis();
-		    	stateAP = AWAITREQUEST;
+		    	stateAP = CLOSE;
 	    		if (serialYes){
 	    			Serial.println();
 	    			Serial.println("CIPSEND TIMEOUT");
@@ -1100,6 +1113,7 @@ void ESP8266::processInterruptAP(){
 	    		wifiSerial.println(linkID);
 	    		timeoutStart = millis();
     		}
+    		hasRequest = false;
 	    }
 	   
 	}

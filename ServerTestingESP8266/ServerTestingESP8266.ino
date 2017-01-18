@@ -3,21 +3,20 @@
 #define SSID "ESPeezy"
 #define PASSWD "MOMENTUM"
 #define BLINKPERIOD 100
-#define UPDATEPERIOD 1000
+#define UPDATEPERIOD 100
+#define DATAPERIOD 100
 
 ESP8266 wifi = ESP8266(1,true);
 String html = "<html>\n<title>It works!</title>\n<body>\n<h1>Congrats</h1>\n<p>You have successfully interneted.</p>\n</body>\n</html>";
 int val = 0;
-int led = 13;
-int light = 0;
 
 int lastupdate = millis();
 int blinktime = millis();
+int dataupdate = millis();
 
 char html2[500];
 
 void setup() {
-  pinMode(led, OUTPUT);
   Serial.begin(115200);
   wifi.begin();
   Serial.println("startserver");
@@ -36,17 +35,13 @@ void loop() {
     wifi.setPage("/",html2);
     lastupdate = millis();
   }
-  m = millis() - blinktime;
-  if(m > BLINKPERIOD){
-    if (light == 1){
-      Serial.println("blink");
-      light = 0;
-      digitalWrite(led, LOW);
-    }
-    else{
-      light = 1;
-      digitalWrite(led, HIGH);
-    }
-    blinktime = millis();
+  m = millis() - dataupdate;
+  if(m > DATAPERIOD){
+     String data = wifi.getData();
+     if (data != ""){
+     Serial.print("data: ");
+     Serial.println(data);
+     
+     }
   }
 }

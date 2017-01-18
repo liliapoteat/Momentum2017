@@ -22,7 +22,6 @@ At the top of the code you will find some include and define statements.
 #define PASSWD "MOMENTUM"
 
 #define POLLPERIOD 1000
-#define BLOCKCHECK 100
 ```
 
 The include statement allows you to utilize the Wifi library we've provided.
@@ -74,8 +73,6 @@ MAC = wifi.getMAC();
 wifi.connectWifi(SSID, PASSWD);
 while (!wifi.isConnected()); //wait for connection
 
-//check blocking
-pinMode(led, OUTPUT);
 ```
 
 The Serial.begin() function sets things up so that you can communication with the Teensy via USB Serial. This is what lets you open up a serial monitor. Serial in general is useful for debugging. The number in the parenthesis just sets the transmission speed, often refered to as the baud rate. All you need to know here is that your serial monitor should be set to the same speed.
@@ -85,17 +82,6 @@ All the lines about wifi are mentioned in the Wifi Library Page. TODO: insert li
 Lastly, there is the pin setup. This is used only for digital pins. In this mode the pins will only output/input a HIGH or a LOW voltage value. LOW-0, HIGH-3.3~5V
 
 ###Loop
-
-The first thing you will notice is what looks like Blink.
-
-```
-digitalWrite(led, HIGH);   // turn the LED on (HIGH is the voltage level)
-  delay(BLOCKCHECK);               // wait for a second
-  digitalWrite(led, LOW);    // turn the LED off by making the voltage LOW
-  delay(BLOCKCHECK);               // wait for a second
-```
-
-This was included for debugging purposes. It allows you to tell how the Teensy is responding when nothing happens in the Serial Monitor. Maybe it is always off, it could mean that you got stuck in an infinite loop somewhere.
 
 The last part of the code is what will be the most challenging part for most people. This requires that you use the Wifi Library. 
 
