@@ -36,7 +36,7 @@ void loop() {
     lastupdate = millis();
   }
   m = millis() - dataupdate;
-  if(m > DATAPERIOD){
+  if(m > DATAPERIOD && wifi.hasData()){
      String data = wifi.getData();
      if (data != ""){
      Serial.print("data: ");

@@ -47,5 +47,5 @@ void loop() {
   // read the value from the sensor:
   sensorValue = analogRead(sensorPin);    
   // turn the ledPin on
-  Serial.println(1/((sensorValue/1024.0*2.6)*scaling)-3);               
+  Serial.println(6937.5/sensorValue);               
 }

@@ -51,6 +51,7 @@ void ESP8266::init(int mode, bool verboseSerial) {
 		hasRequest = false;
 		responseReady = false;
 		connected = false;
+		dataReady = false;
 		doAutoConn = true;
 		newNetworkInfo = false;
 		MAC = ""; 
@@ -77,6 +78,7 @@ void ESP8266::init(int mode, bool verboseSerial) {
 		responseReady = false;
 		newNetworkInfo = false;
 		serverStatus = false;
+		dataReady = false;
 
 		receiveCount = 0;
 		transmitCount = 0;
@@ -204,6 +206,10 @@ bool ESP8266::hasResponse() {
 	return responseReady;
 }
 
+bool ESP8266::hasData() {
+	return dataReady;
+}
+
 String ESP8266::getData() {
 	if(!hasRequest){
 		disableTimer();
@@ -212,6 +218,7 @@ String ESP8266::getData() {
 			d = ((char *)requestAP_p->data);
 			requestAP_p->data[0] = '\0';
 			hasRequest = true;
+			dataReady = false;
 			enableTimer();
 			return d;
 		}
@@ -1203,6 +1210,7 @@ void ESP8266::requestParse(String resp){
 	    	Serial.println((char *)requestAP_p->data);
 	    }
     }
+    dataReady = true;
 }
 
 // Returns true if and only if target is in inputBuffer

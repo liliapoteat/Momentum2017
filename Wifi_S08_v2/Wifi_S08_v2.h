@@ -137,6 +137,7 @@ class ESP8266 {
 		int getReceiveCount();
 		void resetReceiveCount();
 		String getData();
+		bool hasData();
 
 	private:
 		static ESP8266 * _instance; //Static instance of this singleton class
@@ -251,6 +252,7 @@ class ESP8266 {
 		volatile bool reqReconn;
 
 	    //Shared variables for AP
+	    volatile bool dataReady;
 	    volatile int linkID;
 	    volatile Pages *storedPages;
 		volatile RequestAP *requestAP_p;
